@@ -18,6 +18,7 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   final _supabase = Supabase.instance.client;
   List<Ingredient> _ingredients = [];
+  Set<String> _selectedIngredientIds = {};
   bool _isLoading = true;
   bool _isCooking = false;
   bool _isScanning = false;
@@ -59,6 +60,7 @@ class _HomePageState extends State<HomePage> {
     final deletedItem = _ingredients[index];
     setState(() {
       _ingredients.removeAt(index);
+      _selectedIngredientIds.remove(id);
     });
 
     try {
@@ -72,6 +74,37 @@ class _HomePageState extends State<HomePage> {
           context,
         ).showSnackBar(SnackBar(content: Text('Error deleting item: $e')));
       }
+    }
+  }
+
+  void _toggleIngredientSelection(String id) {
+    setState(() {
+      if (_selectedIngredientIds.contains(id)) {
+        _selectedIngredientIds.remove(id);
+      } else {
+        _selectedIngredientIds.add(id);
+      }
+    });
+  }
+
+  void _selectAllIngredients() {
+    setState(() {
+      if (_selectedIngredientIds.length == _ingredients.length) {
+        _selectedIngredientIds.clear();
+      } else {
+        _selectedIngredientIds = _ingredients.map((i) => i.id).toSet();
+      }
+    });
+  }
+
+  Future<void> _showEditDialog(Ingredient ingredient) async {
+    final result = await showDialog(
+      context: context,
+      builder: (context) => EditIngredientDialog(ingredient: ingredient),
+    );
+
+    if (result == true) {
+      _fetchIngredients();
     }
   }
 
@@ -160,12 +193,22 @@ class _HomePageState extends State<HomePage> {
       return;
     }
 
+    if (_selectedIngredientIds.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Select ingredients to use for the recipe!')),
+      );
+      return;
+    }
+
     setState(() {
       _isCooking = true;
     });
 
     try {
-      final ingredientNames = _ingredients.map((i) => i.name).toList();
+      final ingredientNames = _ingredients
+          .where((i) => _selectedIngredientIds.contains(i.id))
+          .map((i) => i.name)
+          .toList();
 
       final response = await _supabase.functions.invoke(
         'generate-recipe',
@@ -239,6 +282,23 @@ class _HomePageState extends State<HomePage> {
               ),
             ),
             actions: [
+              if (_ingredients.isNotEmpty)
+                TextButton.icon(
+                  onPressed: _selectAllIngredients,
+                  icon: Icon(
+                    _selectedIngredientIds.length == _ingredients.length
+                        ? Icons.deselect
+                        : Icons.select_all,
+                    size: 20,
+                  ),
+                  label: Text(
+                    _selectedIngredientIds.length == _ingredients.length
+                        ? 'None'
+                        : 'All',
+                    style: GoogleFonts.outfit(fontWeight: FontWeight.w600),
+                  ),
+                  style: TextButton.styleFrom(foregroundColor: Colors.black),
+                ),
               IconButton(
                 onPressed: (_isScanning || _isCooking) ? null : _showAddDialog,
                 icon: const Icon(
@@ -348,55 +408,82 @@ class _HomePageState extends State<HomePage> {
                     ),
                     onDismissed: (direction) =>
                         _deleteIngredient(ingredient.id, index),
-                    child: Container(
-                      margin: const EdgeInsets.symmetric(vertical: 6),
-                      decoration: BoxDecoration(
-                        color: cardColor == Colors.white
-                            ? Colors.grey[50]
-                            : cardColor,
-                        borderRadius: BorderRadius.circular(24),
-                        border: Border.all(color: Colors.grey[100]!),
-                      ),
-                      child: ListTile(
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 20,
-                          vertical: 4,
-                        ),
-                        leading: Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            shape: BoxShape.circle,
-                            border: Border.all(color: Colors.grey[200]!),
+                    child: GestureDetector(
+                      onTap: () => _toggleIngredientSelection(ingredient.id),
+                      onLongPress: () => _showEditDialog(ingredient),
+                      child: Container(
+                        margin: const EdgeInsets.symmetric(vertical: 6),
+                        decoration: BoxDecoration(
+                          color: _selectedIngredientIds.contains(ingredient.id)
+                              ? Theme.of(context).primaryColor.withOpacity(0.1)
+                              : (cardColor == Colors.white ? Colors.grey[50] : cardColor),
+                          borderRadius: BorderRadius.circular(24),
+                          border: Border.all(
+                            color: _selectedIngredientIds.contains(ingredient.id)
+                                ? Theme.of(context).primaryColor
+                                : Colors.grey[100]!,
+                            width: _selectedIngredientIds.contains(ingredient.id) ? 2 : 1,
                           ),
-                          child: Text(
-                            ingredient.name.isNotEmpty
-                                ? ingredient.name[0].toUpperCase()
-                                : '?',
+                        ),
+                        child: ListTile(
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 4,
+                          ),
+                          leading: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Checkbox(
+                                value: _selectedIngredientIds.contains(ingredient.id),
+                                onChanged: (_) => _toggleIngredientSelection(ingredient.id),
+                                activeColor: Theme.of(context).primaryColor,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                              ),
+                              Container(
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  shape: BoxShape.circle,
+                                  border: Border.all(color: Colors.grey[200]!),
+                                ),
+                                child: Text(
+                                  ingredient.name.isNotEmpty
+                                      ? ingredient.name[0].toUpperCase()
+                                      : '?',
+                                  style: GoogleFonts.outfit(
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.black,
+                                    fontSize: 16,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          title: Text(
+                            ingredient.name,
                             style: GoogleFonts.outfit(
-                              fontWeight: FontWeight.bold,
-                              color: Colors.black,
+                              fontWeight: FontWeight.w600,
                               fontSize: 16,
+                              color: textColor,
                             ),
                           ),
-                        ),
-                        title: Text(
-                          ingredient.name,
-                          style: GoogleFonts.outfit(
-                            fontWeight: FontWeight.w600,
-                            fontSize: 16,
-                            color: textColor,
+                          subtitle: ingredient.expiryDate != null
+                              ? Text(
+                                  'Expires ${DateFormat('MMM dd').format(ingredient.expiryDate!)}',
+                                  style: GoogleFonts.outfit(
+                                    fontSize: 12,
+                                    color: Colors.grey[500],
+                                  ),
+                                )
+                              : null,
+                          trailing: IconButton(
+                            icon: Icon(Icons.edit_outlined, color: Colors.grey[400], size: 20),
+                            onPressed: () => _showEditDialog(ingredient),
+                            tooltip: 'Edit ingredient',
                           ),
                         ),
-                        subtitle: ingredient.expiryDate != null
-                            ? Text(
-                                'Expires ${DateFormat('MMM dd').format(ingredient.expiryDate!)}',
-                                style: GoogleFonts.outfit(
-                                  fontSize: 12,
-                                  color: Colors.grey[500],
-                                ),
-                              )
-                            : null,
                       ),
                     ),
                   );
@@ -421,10 +508,12 @@ class _HomePageState extends State<HomePage> {
               )
             : const Icon(Icons.auto_awesome),
         label: Text(
-          _isCooking ? 'Thinking...' : 'Generate Recipe',
+          _isCooking
+              ? 'Thinking...'
+              : 'Generate Recipe${_selectedIngredientIds.isNotEmpty ? ' (${_selectedIngredientIds.length})' : ''}',
           style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 16),
         ),
-        backgroundColor: Colors.black,
+        backgroundColor: _selectedIngredientIds.isEmpty ? Colors.grey : Colors.black,
         foregroundColor: Colors.white,
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
